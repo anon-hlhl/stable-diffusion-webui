@@ -683,7 +683,7 @@ def oxlamon_matrix(prompt, seed, n_iter, batch_size):
 def process_images(
         outpath, func_init, func_sample, prompt, seed, sampler_name, skip_grid, skip_save, batch_size,
         n_iter, steps, cfg_scale, width, height, prompt_matrix, use_GFPGAN, use_RealESRGAN, realesrgan_model_name,
-        fp, ddim_eta=0.0, do_not_save_grid=False, normalize_prompt_weights=True, init_img=None, init_mask=None,
+        fp, ddim_eta=0.0, do_not_save_grid=False, normalize_prompt_weights=True, init_img=None, init_mask=None, init_mask_restore=False,
         keep_mask=False, mask_blur_strength=3, denoising_strength=0.75, resize_mode=None, uses_loopback=False,
         uses_random_seed_loopback=False, sort_samples=True, write_info_files=True, jpg_sample=False,
         variant_amount=0.0, variant_seed=None):
@@ -842,6 +842,16 @@ def process_images(
                 x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                 x_sample = x_sample.astype(np.uint8)
                 image = Image.fromarray(x_sample)
+
+                if init_mask is not None and init_img is not None and init_mask_restore:
+                    # During inpainting, some fidelity of the original image may be lost,
+                    # here the original image data is overlayed if restoration is selected ('Restore masked areas')
+                    init_mask = init_mask.filter(ImageFilter.GaussianBlur(mask_blur_strength))
+                    init_mask = init_mask.convert('L')
+                    init_img = init_img.convert('RGB')
+                    image = image.convert('RGB')
+                    image = Image.composite(init_img, image, init_mask)
+
                 original_sample = x_sample
                 original_filename = filename
                 if use_GFPGAN and GFPGAN is not None and not use_RealESRGAN:
@@ -1095,8 +1105,9 @@ def img2img(prompt: str, image_editor_mode: str, init_info, mask_mode: str, mask
     sort_samples = 6 in toggles
     write_info_files = 7 in toggles
     jpg_sample = 8 in toggles
-    use_GFPGAN = 9 in toggles
-    use_RealESRGAN = 10 in toggles
+    init_mask_restore = 9 in toggles
+    use_GFPGAN = 10 in toggles
+    use_RealESRGAN = 11 in toggles
 
     if sampler_name == 'DDIM':
         sampler = DDIMSampler(model)
@@ -1252,6 +1263,7 @@ def img2img(prompt: str, image_editor_mode: str, init_info, mask_mode: str, mask
                 normalize_prompt_weights=normalize_prompt_weights,
                 init_img=init_img,
                 init_mask=init_mask,
+                init_mask_restore=init_mask_restore,
                 keep_mask=keep_mask,
                 mask_blur_strength=mask_blur_strength,
                 denoising_strength=denoising_strength,
@@ -1308,6 +1320,7 @@ def img2img(prompt: str, image_editor_mode: str, init_info, mask_mode: str, mask
             normalize_prompt_weights=normalize_prompt_weights,
             init_img=init_img,
             init_mask=init_mask,
+            init_mask_restore=init_mask_restore,
             keep_mask=keep_mask,
             mask_blur_strength=mask_blur_strength,
             denoising_strength=denoising_strength,
@@ -1456,6 +1469,7 @@ img2img_toggles = [
     'Sort samples by prompt',
     'Write sample info files',
     'jpg samples',
+    'Restore masked areas (recommended if using loopback)'
 ]
 if GFPGAN is not None:
     img2img_toggles.append('Fix faces using GFPGAN')
